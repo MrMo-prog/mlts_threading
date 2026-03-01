@@ -1,4 +1,3 @@
-setwd("C:/Users/kenne/OneDrive/Dissertation/R-Paket/GitHub/mlts_tests/moritz/functions")
 library(mlts)
 library(rstan)
 library(tidyverse)
@@ -12,15 +11,15 @@ Q = 1
 mod = mlts_model(q = Q, fix_inno_covs = F, inno_covs_dir = "pos")
 simData = mlts_sim(mod, N = N, TP = TP, default = T, seed = 123)
 
-# add some missings: 
-noFit = mlts_fit(mod, data = simData$data, id = "ID", ts = paste0("Y",1:Q), 
+# add some missings:
+noFit = mlts_fit(mod, data = simData$data, id = "ID", ts = paste0("Y",1:Q),
                  fit_model = F)
 stan_data = noFit$standata
 
 
-# old model without threading: 
-fitted_old = stan("AR_simple.stan", data = stan_data, 
-              pars = c("gammas", "sd_R", "bcorr"), 
+# old model without threading:
+fitted_old = stan("AR_simple.stan", data = stan_data,
+              pars = c("gammas", "sd_R", "bcorr"),
               iter = 1500, chains = 2, cores = 2, seed = 1015)
 
 ## same model with treading function
@@ -30,14 +29,14 @@ stan_data$starts = array(unlist(lapply(1:N, function(x){
 stan_data$seq_N = 1:N
 stan_data$grainsize = 1
 
-fitted = stan("AR_simple_thread.stan", data = stan_data,  
-               pars = c("gammas", "sd_R", "bcorr"), 
+fitted = stan("AR_simple_thread.stan", data = stan_data,
+               pars = c("gammas", "sd_R", "bcorr"),
                iter = 1500, chains = 2, cores = 2, seed = 1015)
 
 
 
 
-# check elapsed times: 
+# check elapsed times:
 ## by chain
 apply(rstan::get_elapsed_time(fitted),1,sum)
 apply(rstan::get_elapsed_time(fitted_old),1,sum)
@@ -46,8 +45,8 @@ apply(rstan::get_elapsed_time(fitted_old),1,sum)
 max(apply(rstan::get_elapsed_time(fitted),1,sum)) / 60
 max(apply(rstan::get_elapsed_time(fitted_old),1,sum)) / 60
 
-## relative time gain 
-1 - ( max(apply(rstan::get_elapsed_time(fitted),1,sum)) / 
+## relative time gain
+1 - ( max(apply(rstan::get_elapsed_time(fitted),1,sum)) /
       max(apply(rstan::get_elapsed_time(fitted_old),1,sum)) )
 
 
@@ -55,8 +54,8 @@ max(apply(rstan::get_elapsed_time(fitted_old),1,sum)) / 60
 summary(fitted)$summary == summary(fitted_old)$summary
 # no longer the same when sampling based on y^w instead of y
 
-# percentage of equal values by column after rounding 
-apply(round(summary(fitted)$summary,1) == round(summary(fitted_old)$summary,1),2, 
+# percentage of equal values by column after rounding
+apply(round(summary(fitted)$summary,1) == round(summary(fitted_old)$summary,1),2,
       function(x){sum(x,na.rm = T)/sum(!is.na(x))})
 
 # check estimates and convergence criteria
@@ -79,7 +78,7 @@ plot(sums$Bulk_ESS, sums_old$Bulk_ESS,
 abline(a = 0, b = 1)
 abline(v = 400, h = 400, lty = 2)
 
-plot(sums$Tail_ESS, sums_old$Tail_ESS, 
+plot(sums$Tail_ESS, sums_old$Tail_ESS,
      xlim = c(0, max(c(sums$Tail_ESS, sums_old$Tail_ESS))),
      ylim = c(0, max(c(sums$Tail_ESS, sums_old$Tail_ESS))))
 abline(a = 0, b = 1)
@@ -90,11 +89,11 @@ abline(a = 0, b = 1)
 abline(v = 100, h = 100, lty = 2)
 
 
-# check individual estimates based on their posterior means 
+# check individual estimates based on their posterior means
 means     = get_posterior_mean(fitted)
 means_old = get_posterior_mean(fitted_old)
 
-# select random mean levels 
+# select random mean levels
 mus = means[rownames(means) %in% paste0("b_free[",1:N,",1]"),3]
 mus_old = means_old[rownames(means_old) %in% paste0("b_free[",1:N,",1]"),3]
 
