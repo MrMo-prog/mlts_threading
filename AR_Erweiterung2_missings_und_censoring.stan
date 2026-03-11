@@ -1,6 +1,6 @@
 functions{
-  #include "functions/partial_sum.stan"
   #include "functions/function_calculate_b.stan"
+  #include "functions/function_missings_and_censoring.stan"
 }
 
 data {
@@ -17,6 +17,21 @@ data {
   array[n_random] int is_random;  // which parameters to model person-specific
   array[N] int<lower=1> N_obs_id; // number of observations for each unit
   array[D] vector[N_obs] y; 	    // array of observations
+
+  // handling of missing values
+  int n_miss;                      // total number of missings across D
+  array[D] int n_miss_D;           // missings per D
+  array[D,max(n_miss_D)] int pos_miss_D; // array of missings' positions
+
+  //censoring
+  real censL_val;
+  int n_censL;                     // total number of obs at LB across D
+  array[D] int n_censL_D;          // obs at LB per D
+  array[D,max(n_censL_D)] int pos_censL_D; // array of obs at LBs' positions
+  real censR_val;
+  int n_censR;                      // total number of obs at LB across D
+  array[D] int n_censR_D;           // obs at LB per D
+  array[D,max(n_censR_D)] int pos_censR_D; // array of obs at LBs' positions
 
   // model adaptions based on user inputs:
   array[D_cen] int<lower=0, upper=1> innos_rand; // 1=person specific (random), 0=fixed
@@ -45,7 +60,6 @@ data {
 
   array[D] int<lower=0,upper=1> is_wcen;   // parameter should be within centered = 1; should not = 0
   array[D] int<lower=0,upper=D> D_cen_pos; // pos of parameters that should be centered
-  int grainsize;
 }
 
 transformed data{
@@ -74,6 +88,9 @@ parameters {
   array[G] vector<lower=0>[n_innos_fix] sigma;    // SDs of fixed innovation variances
   array[G] cholesky_factor_corr[n_random] L;      // cholesky factor of random effects correlation matrix
   array[G] row_vector[n_random] gammas;           // fixed effect (intercepts)
+  vector[n_miss] y_impute;                        // vector to store imputed values
+  vector<upper=censL_val>[n_censL] y_impute_censL;
+  vector<upper=censR_val>[n_censR] y_impute_censR;
 }
 
 transformed parameters{
@@ -96,33 +113,86 @@ transformed parameters{
   }
 }
 
-
 model {
+  array[D] vector[N_obs] y_merge;
   array[G] matrix[n_random, n_random] SIGMA;
+
   for(g in 1:G){
     SIGMA[g] = diag_pre_multiply(sd_R[g], L[g]); // covariance matrix of parameters by group
   }
 
-target += reduce_sum(
-    partial_sum_log_lik,
-    seq_N,
-    grainsize,
-    N_obs_id, g_id, b_free, gammas, SIGMA, D_cen, maxLag, D,
-    is_wcen, y, pos_start, pos_end, b, D_cen_pos, N_pred,
-    Lag_pred, D_pred, D_pred2, Lag_pred2, Dpos1, Dpos2, sd_noise
-  );
+  y_merge = y;
+  if (n_miss > 0){
+    y_merge = missings_and_censoring(y_merge, n_miss_D, pos_miss_D, y_impute);
+  }
+  if (n_censL > 0){
+    y_merge = missings_and_censoring(y_merge, n_censL_D, pos_censL_D, y_impute_censL);
+  }
+  if (n_censR > 0){
+    y_merge = missings_and_censoring(y_merge, n_censR_D, pos_censR_D, y_impute_censR);
+  }
+
+  for(pp in 1:N){
+      int obs_id = N_obs_id[pp]; // observations per person
+      int gg_p = g_id[pp];       // group
+
+      // level 2 prediction
+      target += multi_normal_cholesky_lpdf(b_free[pp] | to_vector(gammas[gg_p]), SIGMA[gg_p]);
+      {
+      // array of predicted values
+      array[D_cen] vector[obs_id-maxLag] mus;
+      // create latent mean centered versions of observations
+      array[D] vector[N_obs_id[pp]] y_cen;
+
+      // calculating y_cen --> array vector of within centered observations
+      for(d in 1:D){
+        if(is_wcen[d] == 1){
+          y_cen[d] = y_merge[d, pos_start[pp]: pos_end[pp]] - b[pp, D_cen_pos[d]];
+        } else {
+          y_cen[d] = y_merge[d, pos_start[pp]: pos_end[pp]];
+        }
+      }
+
+      for(d in 1:D){
+
+        if(is_wcen[d] == 1){
+          // build prediction matrix for specific dimensions
+          int n_cols; // matrix dimensions
+          n_cols = N_pred[d];
+          {
+            matrix[obs_id - maxLag, n_cols] b_mat; // dimension specific prediction matrix: time points * predictors
+            vector[n_cols] b_use; //
+            for(nd in 1:N_pred[d]){ // AR effect and CL effects
+              int lag_use = Lag_pred[d, nd];
+              if(D_pred2[d, nd] == -99){
+                b_mat[,nd] = y_cen[D_pred[d, nd], (1+maxLag-lag_use):(obs_id-lag_use)];
+              } else { // interactions between two ds
+                int lag_use2 = Lag_pred2[d, nd];
+                b_mat[,nd] = y_cen[D_pred[d, nd], (1+maxLag-lag_use):(obs_id-lag_use)] .*
+                y_cen[D_pred2[d, nd], (1+maxLag-lag_use2):(obs_id-lag_use2)];
+              }
+            }
+            b_use[1:N_pred[d]] = to_vector(b[pp, Dpos1[d]:Dpos2[d]]);
+            mus[D_cen_pos[d]] = b_mat * b_use;
+          }
+          target += normal_lpdf(y_cen[d, (1+maxLag):obs_id] | mus[D_cen_pos[d]], sd_noise[D_cen_pos[d],pp]);
+        }
+      } // end of loop over dimensions
+
+    } // end of local calculations
+
+  } // end of loop over subjects
 
   for (g in 1:G){
     target += normal_lpdf(gammas[g] | 0, 10);
     target += cauchy_lpdf(sd_R[g] | 0, 2);
     target += lkj_corr_cholesky_lpdf(L[g] | 1);
   }
-
 }
 
 generated quantities{
   array[G] matrix[n_random,n_random] bcorr; // random coefficients correlation matrix
-    for(g in 1:G){
-        bcorr[g] = multiply_lower_tri_self_transpose(L[g]);
-      }
+  for(g in 1:G){
+      bcorr[g] = multiply_lower_tri_self_transpose(L[g]);
+    }
 }

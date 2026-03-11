@@ -4,7 +4,7 @@ library(tidyverse)
 rstan_options(auto_write = TRUE, threads_per_chain = 2)
 
 N = 200
-TP =100
+TP =400
 Q = 1
 
 mod = mlts_model(q = Q, fix_inno_covs = F, inno_covs_dir = "pos")
@@ -19,7 +19,7 @@ stan_data = noFit$standata
 # old model without threading:
 fitted_old = stan("AR_simple.stan", data = stan_data,
               pars = c("gammas", "sd_R", "bcorr"),
-              iter = 1500, chains = 2, cores = 2, seed = 1015)
+              iter = 2000, chains = 2, cores = 2, seed = 1015)
 
 ## same model with treading function
 stan_data$starts = array(unlist(lapply(1:N, function(x){
@@ -30,7 +30,7 @@ stan_data$grainsize = 1
 
 fitted = stan("AR_simple_thread.stan", data = stan_data,
                pars = c("gammas", "sd_R", "bcorr"),
-               iter = 1500, chains = 2, cores = 2, seed = 1015)
+               iter = 2000, chains = 2, cores = 2, seed = 1015)
 
 
 

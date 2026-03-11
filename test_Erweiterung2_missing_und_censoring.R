@@ -19,7 +19,7 @@ stan_data = noFit$standata
 
 
 # old model without threading:
-fitted_old = stan("AR_Erweiterung1.stan", data = stan_data,
+fitted_old = stan("AR_Erweiterung2_missings_und_censoring.stan", data = stan_data,
                   pars = c("gammas", "sd_R", "bcorr"),
                   iter = iterations, chains = 2, cores = 2, seed = 1015)
 
@@ -30,7 +30,7 @@ stan_data$starts = array(unlist(lapply(1:N, function(x){
 # stan_data$seq_N = 1:N
 stan_data$grainsize = 1
 
-fitted = stan("AR_Erweiterung1_thread.stan", data = stan_data,
+fitted = stan("AR_Erweiterung2_threading_missings_censoring.stan", data = stan_data,
               pars = c("gammas", "sd_R", "bcorr"),
               iter = iterations, chains = 2, cores = 2, seed = 1015)
 

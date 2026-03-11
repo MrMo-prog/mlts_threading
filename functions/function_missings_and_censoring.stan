@@ -25,3 +25,4 @@ array[] vector missings_and_censoring (array[] vector y,
   return y_out;
 }
 
+
