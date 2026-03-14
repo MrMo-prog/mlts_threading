@@ -20,8 +20,24 @@ real partial_sum_log_lik(array[] int slice_N, int start, int end,
     array[,] int Lag_pred2,
     array[] int Dpos1,
     array[] int Dpos2,
-    array[] vector sd_noise
+    array[] vector sd_noise,
+    // missings and censoring
+    int n_miss,
+    array[] int n_miss_D,
+    array[,] int pos_miss_D,
+    vector y_impute,
+    array[,] int pos_start_miss,
+    array[,] int pos_end_miss,
+    array[,] int seq_N_miss,
 
+    int n_censL,
+    array[] int n_censL_D,
+    array[,] int pos_censL_D,
+    vector y_impute_censL,
+    int n_censR,
+    array[] int n_censR_D,
+    array[,] int pos_censR_D,
+    vector y_impute_censR
     ) {
 
       real lp = 0;
@@ -40,12 +56,23 @@ real partial_sum_log_lik(array[] int slice_N, int start, int end,
         // create latent mean centered versions of observations
         array[D] vector[N_obs_id[pp]] y_cen;
 
-        // calculating y_cen --> array vector of within centered observations
         for(d in 1:D){
+          // calculating missings
+          vector[N_obs_id[pp]] y_lokal = y[d, pos_start[pp] : pos_end[pp]];
+
+          if (seq_N_miss[pp, d] > 0){
+            array[seq_N_miss[pp, d]] int y_lokal_pos = pos_miss_D[d, pos_start_miss[pp, d] : pos_end_miss[pp, d]];
+            for (m in 1:seq_N_miss[pp, d]){
+              y_lokal_pos[m] = y_lokal_pos[m] - pos_start[pp] + 1;
+            }
+
+            y_lokal[y_lokal_pos] = segment(y_impute, pos_start_miss[pp, d], seq_N_miss[pp, d]);
+          }
+          // calculating y_cen --> array vector of within centered observations
           if(is_wcen[d] == 1){
-            y_cen[d] = y[d, pos_start[pp]: pos_end[pp]] - b[pp, D_cen_pos[d]];
+            y_cen[d] = y_lokal - b[pp, D_cen_pos[d]];
           } else {
-            y_cen[d] = y[d, pos_start[pp]: pos_end[pp]];
+            y_cen[d] = y_lokal;
           }
         }
 
@@ -80,4 +107,4 @@ real partial_sum_log_lik(array[] int slice_N, int start, int end,
     } // end of loop over subjects
   return(lp);
 
-    }
+}
