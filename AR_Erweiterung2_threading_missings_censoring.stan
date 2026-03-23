@@ -1,6 +1,7 @@
 functions{
   #include "functions/partial_sum.stan"
   #include "functions/function_calculate_b.stan"
+  #include "functions/function_missings_and_censoring.stan"
 }
 
 data {
@@ -32,6 +33,7 @@ data {
   int n_censR;                      // total number of obs at LB across D
   array[D] int n_censR_D;           // obs at LB per D
   array[D,max(n_censR_D)] int pos_censR_D; // array of obs at LBs' positions
+
 
   // model adaptions based on user inputs:
   array[D_cen] int<lower=0, upper=1> innos_rand; // 1=person specific (random), 0=fixed
@@ -80,34 +82,6 @@ transformed data{
 
     pos = pos + obs_id_temp;
   }
-
-  // creating positioning for missings and censoring in partial sum
-  array[N, D] int pos_start_miss = rep_array(0, N, D);            //starting position for each person and each dimension in y_impute
-  array[N, D] int pos_end_miss = rep_array(0, N, D);
-  array[N, D] int seq_N_miss = rep_array(0, N, D);
-
-  int impute_pos = 0;
-
-  for (d in 1:D){
-    for (n in 1:N){
-      int counter = 0;
-      int end_pos = 0;
-      for (x in 1: n_miss_D[d]){
-        if (pos_miss_D[d, x] >= pos_start[n] && pos_miss_D[d, x] <= pos_end[n]){
-          if (counter == 0){
-            pos_start_miss[n, d] = impute_pos + x;
-          }
-          counter = counter + 1;
-          end_pos = x;
-        }
-      }
-      if (counter > 0){
-        pos_end_miss[n, d] = impute_pos + end_pos;
-      }
-      seq_N_miss[n, d] = counter;
-    }
-    impute_pos = impute_pos + n_miss_D[d];
-  }
 }
 
 parameters {
@@ -144,11 +118,21 @@ transformed parameters{
 
 
 model {
-
+  array[D] vector[N_obs] y_merge;
   array[G] matrix[n_random, n_random] SIGMA;
-
   for(g in 1:G){
     SIGMA[g] = diag_pre_multiply(sd_R[g], L[g]); // covariance matrix of parameters by group
+  }
+
+  y_merge = y;
+  if (n_miss > 0){
+    y_merge = missings_and_censoring(y_merge, n_miss_D, pos_miss_D, y_impute);
+  }
+  if (n_censL > 0){
+    y_merge = missings_and_censoring(y_merge, n_censL_D, pos_censL_D, y_impute_censL);
+  }
+  if (n_censR > 0){
+    y_merge = missings_and_censoring(y_merge, n_censR_D, pos_censR_D, y_impute_censR);
   }
 
 target += reduce_sum(
@@ -156,10 +140,8 @@ target += reduce_sum(
     seq_N,
     grainsize,
     N_obs_id, g_id, b_free, gammas, SIGMA, D_cen, maxLag, D,
-    is_wcen, y, pos_start, pos_end, b, D_cen_pos, N_pred,
-    Lag_pred, D_pred, D_pred2, Lag_pred2, Dpos1, Dpos2, sd_noise, n_miss, n_miss_D,
-    pos_miss_D, y_impute, pos_start_miss, pos_end_miss, seq_N_miss, n_censL, n_censL_D, pos_censL_D, y_impute_censL, n_censR,
-    n_censR_D, pos_censR_D, y_impute_censR
+    is_wcen, y_merge, pos_start, pos_end, b, D_cen_pos, N_pred,
+    Lag_pred, D_pred, D_pred2, Lag_pred2, Dpos1, Dpos2, sd_noise
   );
 
   for (g in 1:G){
@@ -176,4 +158,3 @@ generated quantities{
         bcorr[g] = multiply_lower_tri_self_transpose(L[g]);
       }
 }
-

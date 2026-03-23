@@ -3,20 +3,38 @@ library(rstan)
 library(tidyverse)
 rstan_options(auto_write = TRUE, threads_per_chain = 2)
 
-N = 200
-TP =400
+N = 100
+TP =100
 Q = 1
 maxlag = 1
-iterations = 1000
+iterations = 3000
+missings = 0.20
 
 mod = mlts_model(q = Q, fix_inno_covs = F, inno_covs_dir = "pos", max_lag = maxlag)
 simData = mlts_sim(mod, N = N, TP = TP, default = T, seed = 123)
 
 # add some missings:
+
+set.seed(999)
+total_obs <- nrow(simData$data)
+number_missings <- floor(missings*total_obs)
+missing_rows <- sample(1:total_obs, size = number_missings)
+simData$data$Y1[missing_rows] <- NA
+
+# censoring
+#censL_val <- quantile(simData$data$Y1, 0.15, na.rm = TRUE)
+#censR_val <- quantile(simData$data$Y1, 0.85, na.rm = TRUE)
+
+#censL_rows <- which(simData$data$Y1 <= censL_val)
+#censR_rows <- which(simData$data$Y1 >= censR_val)
+
+#simData$data$Y1[censL_rows] <- censL_val
+#simData$data$Y1[censR_rows] <- censR_val
+
+
 noFit = mlts_fit(mod, data = simData$data, id = "ID", ts = paste0("Y",1:Q),
                  fit_model = F)
 stan_data = noFit$standata
-
 
 # old model without threading:
 fitted_old = stan("AR_Erweiterung2_missings_und_censoring.stan", data = stan_data,
@@ -30,7 +48,7 @@ stan_data$starts = array(unlist(lapply(1:N, function(x){
 # stan_data$seq_N = 1:N
 stan_data$grainsize = 1
 
-fitted = stan("AR_Erweiterung2_threading_missings_censoring.stan", data = stan_data,
+fitted = stan("AR_Erweiterung2.1_threading_missings_censoring.stan", data = stan_data,
               pars = c("gammas", "sd_R", "bcorr"),
               iter = iterations, chains = 2, cores = 2, seed = 1015)
 
